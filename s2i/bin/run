@@ -1,0 +1,32 @@
+#!/bin/bash -e
+#
+# S2I run script for the 'radanalyticsio/tensorflow-serving-s2i' image.
+# The run script executes the server that runs your application.
+#
+# For more information see the documentation:
+#	https://github.com/openshift/source-to-image/blob/master/docs/builder_image.md
+#
+
+set -e
+
+echo "Running app..."
+
+echo "PWD = "$PWD
+ls -l /opt/app-root/src/
+echo "MODEL_NAME = "$MODEL_NAME
+echo "MODEL_PATH = "$MODEL_PATH
+echo "model_base_path = /opt/app-root/src/"
+
+ls -l /opt/app-root/
+
+export CUDA_HOME="/usr/local/cuda" 
+export CUDA_PATH="${CUDA_HOME}" 
+export PATH="${CUDA_HOME}/bin${PATH:+:${PATH}}" 
+export LD_LIBRARY_PATH="${CUDA_HOME}/lib64${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"; 
+echo -e “$CUDA_HOME \\n $CUDA_PATH \\n $LD_LIBRARY_PATH”
+
+echo " -----> Run tensorflow server."
+
+#binary gets copied to  /opt/app-root/src/tf/tensorflow_model_server
+/opt/app-root/src/tf/tensorflow_model_server --port=6006 --model_name=$MODEL_NAME --model_base_path=/opt/app-root/src/$MODEL_PATH
+

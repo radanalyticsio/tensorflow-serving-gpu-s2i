@@ -1,0 +1,272 @@
+{
+    "kind": "Template",
+    "apiVersion": "v1",
+    "metadata": {
+        "name": "tensorflow-server-gpu",
+        "annotations": {
+            "description": "Tensorflow Serving server",
+            "tags": "tf-app"
+        }
+    },
+    "objects": [
+        {
+            "kind": "ImageStream",
+            "apiVersion": "v1",
+            "metadata": {
+                "name": "${APPLICATION_NAME}",
+                "labels": {
+                    "appid": "tf-app-server-${APPLICATION_NAME}",
+                    "appName": "${APPLICATION_NAME}"
+                }
+            }
+        },
+        {
+            "kind": "ImageStream",
+            "apiVersion": "v1",
+            "metadata": {
+                "name": "${APPLICATION_NAME}-s2i",
+                "labels": {
+                    "appid": "tf-app-server-${APPLICATION_NAME}",
+                    "appName": "${APPLICATION_NAME}"
+                }
+            },
+            "spec": {
+                "tags": [
+                    {
+                        "name": "latest",
+                        "from": {
+                            "kind": "DockerImage",
+                            "name": "${S2I_IMAGE}"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "kind": "BuildConfig",
+            "apiVersion": "v1",
+            "metadata": {
+                "name": "${APPLICATION_NAME}",
+                "labels": {
+                    "appid": "tf-app-server-${APPLICATION_NAME}",
+                    "appName": "${APPLICATION_NAME}"
+                }
+            },
+            "spec": {
+                "triggers": [
+                    {
+                        "type": "ConfigChange"
+                    },
+                    {
+                        "type": "ImageChange"
+                    }
+                ],
+                "source": {
+                    "type": "Git",
+                    "git": {
+                        "uri": "${SOURCE_REPOSITORY}"
+                    },
+                    "images": [
+                        {
+                            "from" : {
+                                "kind" : "DockerImage",
+                                "name": "${TF_IMAGE}"
+                            },
+                            "paths": [
+                                {
+                                    "destinationDir": "tf/",
+                                    "sourcePath": "/tf/tensorflow_model_server"
+                                }
+                            ]
+                        }
+                    ]
+                },
+                "strategy": {
+                    "type": "Source",
+                    "sourceStrategy": {
+                        "from": {
+                            "kind": "ImageStreamTag",
+                            "name": "${APPLICATION_NAME}-s2i:latest"
+                        }
+                    }
+                },
+                "output": {
+                    "to": {
+                        "kind": "ImageStreamTag",
+                        "name": "${APPLICATION_NAME}:latest"
+                    }
+                }
+            }
+        },
+        {
+            "kind": "DeploymentConfig",
+            "apiVersion": "v1",
+            "metadata": {
+                "name": "${APPLICATION_NAME}",
+                "labels": {
+                    "appid": "tf-app-server-${APPLICATION_NAME}",
+                    "appName": "${APPLICATION_NAME}"
+                }
+            },
+            "spec": {
+                "strategy": {
+                    "type": "Rolling"
+                },
+                "affinity": {
+                    "nodeAffinity": {
+                        "requiredDuringSchedulingIgnoredDuringExecution": {
+                            "nodeSelectorTerms": [
+                                {
+                                    "matchExpressions": [
+                                        {
+                                            "key": "alpha.kubernetes.io/nvidia-gpu-name",
+                                            "operator": "In",
+                                            "values": [
+                                                "${GPU_NAME}"
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    }
+                },
+                "triggers": [
+                    {
+                        "type": "ConfigChange"
+                    },
+                    {
+                        "type": "ImageChange",
+                        "imageChangeParams": {
+                            "automatic": true,
+                            "containerNames": [
+                                "${APPLICATION_NAME}"
+                            ],
+                            "from": {
+                                "kind": "ImageStreamTag",
+                                "name": "${APPLICATION_NAME}:latest"
+                            }
+                        }
+                    }
+                ],
+                "replicas": 1,
+                "selector": {
+                    "deploymentconfig": "${APPLICATION_NAME}"
+                },
+                "template": {
+                    "metadata": {
+                        "labels": {
+                            "appid": "tf-app-server-${APPLICATION_NAME}",
+                            "deploymentconfig": "${APPLICATION_NAME}",
+                            "appName": "${APPLICATION_NAME}"
+                        }
+                    },
+                    "spec": {
+                        "containers": [
+                            {
+                                "env": [
+                                    {
+                                        "name": "MODEL_NAME",
+                                        "value": "${MODEL_NAME}"
+                                    },
+                                    {
+                                        "name": "MODEL_PATH",
+                                        "value": "${SOURCE_DIRECTORY}"
+                                    }
+                                ],
+                                "name": "${APPLICATION_NAME}",
+                                "image": "${APPLICATION_NAME}:latest",
+                                "resources": {
+                                    "limits": {
+                                        "alpha.kubernetes.io/nvidia-gpu": "${GPU_LIMITS}"
+                                    }
+                                },
+                                "ports": [
+                                    {
+                                        "containerPort": 6006,
+                                        "protocol": "TCP"
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            }
+        },
+        {
+            "kind": "Service",
+            "apiVersion": "v1",
+            "metadata": {
+                "name": "${APPLICATION_NAME}",
+                "labels": {
+                    "appid": "tf-app-server-${APPLICATION_NAME}",
+                    "appName": "${APPLICATION_NAME}"
+                }
+            },
+            "spec": {
+                "ports": [
+                    {
+                        "name": "6006-tcp",
+                        "protocol": "TCP",
+                        "port": 6006,
+                        "targetPort": 6006
+                    }
+                ],
+                "selector": {
+                    "deploymentconfig": "${APPLICATION_NAME}"
+                }
+            }
+        }
+    ],
+    "parameters": [
+        {
+            "name": "APPLICATION_NAME",
+            "description": "The name of the application.",
+            "value": "tf-app-server",
+            "from": "[a-zA-Z0-9]{10}",
+            "required": true
+        },
+        {
+            "name": "MODEL_NAME",
+            "description": "Name of tensorflow Model",
+            "value": "mnist",
+            "required": true
+        },
+        {
+            "name": "SOURCE_REPOSITORY",
+            "description": "Git repository for source.",
+            "value": "https://github.com/sub-mod/mnist-models",
+            "required": true
+        },
+        {
+            "name": "SOURCE_DIRECTORY",
+            "description": "Sub-directory of repository for source files.",
+            "value": "gpu/cnn",
+            "required": true
+        },
+        {
+            "name": "GPU_NAME",
+            "description": "Name of GPU",
+            "value": "Tesla-M60",
+            "required": true
+        },
+        {
+            "name": "GPU_LIMITS",
+            "description": "Number of GPUs to allocate",
+            "value": "1",
+            "required": true
+        },
+        {
+            "name": "S2I_IMAGE",
+            "description": "Source to image for tensorflow-server",
+            "value": "submod/tensorflow-serving-s2i-gpu:latest",
+            "required": false
+        },
+        {
+            "name": "TF_IMAGE",
+            "description": "Name of tensorflow binary Image",
+            "value": "submod/tf-server:cuda9-cudnn7-centos7",
+            "required": false
+        }
+    ]
+}
